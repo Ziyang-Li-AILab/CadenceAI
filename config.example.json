@@ -1,0 +1,24 @@
+{
+  "llm": {
+    "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    "api_key": "your-api-key-here",
+    "model": "doubao",
+    "temperature": 0.7,
+    "max_tokens": 3000
+  },
+  "output": {
+    "base_dir": "pipeline_output",
+    "save_intermediate": true,
+    "save_meetings": true
+  },
+  "quality": {
+    "max_prompt_length": 300,
+    "min_dialogue_ratio": 0.3,
+    "require_character_consistency": true
+  },
+  "video": {
+    "api_endpoint": "",
+    "api_key": "",
+    "mock_mode": true
+  }
+}

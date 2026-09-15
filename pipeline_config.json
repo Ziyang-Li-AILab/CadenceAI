@@ -1,0 +1,37 @@
+{
+  "llm": {
+    "endpoint": "https://ark.cn-beijing.volces.com/api/v3/chat/completions",
+    "api_key": "YOUR_API_KEY_HERE",
+    "model": "doubao-pro-32k",
+    "temperature": 0.7,
+    "max_tokens": 4000
+  },
+  "video_api": {
+    "provider": "mock",
+    "endpoint": "",
+    "api_key": "",
+    "default_duration": 3,
+    "aspect_ratio": "16:9",
+    "resolution": "1080p"
+  },
+  "tts": {
+    "provider": "mock",
+    "endpoint": "",
+    "api_key": "",
+    "default_voice": "neutral",
+    "speed": 1.0
+  },
+  "output_dir": "pipeline_output",
+  "parallel_processing": false,
+  "quality_checks": {
+    "enable_quality_gate": true,
+    "max_prompt_length": 300,
+    "check_abstract_words": true,
+    "min_visual_elements": 3
+  },
+  "round_table": {
+    "enable": true,
+    "min_consensus": 0.7,
+    "max_iterations": 3
+  }
+}
