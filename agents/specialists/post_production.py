@@ -321,24 +321,16 @@ class PostProduction(BaseAgent):
             data=result
         )
     
-    def _initialize_voice_profiles(self, shots: List[Dict], reference_audio: str = None, 
-                                   protagonist_name: str = "无名"):
+    def _initialize_voice_profiles(self, shots: List[Dict], reference_audio: str = None,
+                                   protagonist_name: Optional[str] = None):
+        """Initialize voice profiles from the characters in the current shots.
+
+        The reference audio is bound to the first current character when no
+        explicit protagonist name is supplied; no project-specific name is used.
         """
-        【关键】初始化音色配置
-        
-        核心原则：
-        1. 参考音频只用于主角
-        2. 旁白使用独立音色，永远不使用参考音频
-        3. 其他角色生成音色描述
-        
-        Args:
-            shots: 镜头列表
-            reference_audio: 参考音频路径（仅用于主角）
-            protagonist_name: 主角名称（默认"无名"）
-        """
-        # 1. 收集所有角色（从多个来源提取）
+        # 1. Collect all characters from the current output.
         all_characters = set()
-        character_dialogues = {}  # 角色 -> 对话列表
+        character_dialogues = {}  # character -> dialogue list
         
         for shot in shots:
             audio_prompt = shot.get("audio_prompt", {})
@@ -360,9 +352,9 @@ class PostProduction(BaseAgent):
             meta_chars = metadata.get("characters", [])
             characters_in_shot.extend(meta_chars)
             
-            # 来源3: 从visual_prompt中提取（如果包含主角名称）
+            # 来源3: 仅在调用方明确指定主角时检查视觉提示词。
             visual_prompt = shot.get("visual_prompt", "")
-            if protagonist_name in visual_prompt:
+            if protagonist_name and protagonist_name in visual_prompt:
                 characters_in_shot.append(protagonist_name)
             
             # 去重并记录
@@ -374,16 +366,17 @@ class PostProduction(BaseAgent):
                     if dialogue_prompt:
                         character_dialogues[char].append(dialogue_prompt)
         
-        # 2. 为主角配置参考音频
-        if reference_audio and protagonist_name in all_characters:
+        # 2. 将参考音频绑定到当前输出中的第一个角色。
+        if reference_audio and protagonist_name is None and all_characters:
+            protagonist_name = next(iter(all_characters))
+
+        if reference_audio and protagonist_name:
             self.voice_profile_manager.set_reference_voice(
                 character=protagonist_name,
                 reference_audio=reference_audio,
                 description=f"{protagonist_name}的参考音色（用户提供）"
             )
-            print(f"[后期制作] ✓ 参考音频绑定到主角: {protagonist_name}")
-        elif reference_audio and protagonist_name not in all_characters:
-            print(f"[后期制作] ⚠ 警告: 主角 '{protagonist_name}' 未在镜头中出现，参考音频未使用")
+            print(f"[后期制作] ✓ 参考音频绑定到当前角色: {protagonist_name}")
         
         # 3. 为旁白配置独立音色（永远不使用参考音频）
         self.voice_profile_manager.set_narration_voice(

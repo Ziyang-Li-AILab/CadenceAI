@@ -30,6 +30,8 @@ wheels/
 !.env.*.example
 .env.local
 .env.*.local
+configs/*
+!configs/*.example
 
 
 # IDE
@@ -48,11 +50,31 @@ Desktop.ini
 pipeline_run.log
 *.log
 output/
+
+# Generated outputs and local assets (not source code)
+pipeline_output/
+reference_image/
+assets/
+photos/
+subtitles.srt
+
+# One-off debug / fix scripts (kept locally)
+fix_videoprodution.py
+test_image_generate.py
+debug_world_builder_response.txt
+
+# Media
 pipeline_output/05_videos/*.mp4
 videos/*.mp4
 *.m4a
 *.wav
 *.mp3
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
 
 # Dependencies
 .python-packages/

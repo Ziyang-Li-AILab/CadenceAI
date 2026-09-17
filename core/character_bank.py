@@ -7,18 +7,11 @@ Character Bank - 角色银行系统
 
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
-from enum import Enum
 
 
-class AgentRole(Enum):
-    """Agent角色枚举"""
-    WORLD_BUILDER = "世界观构建师"
-    WRITER = "编剧"
-    STORYBOARD_ARTIST = "分镜师"
-    CINEMATOGRAPHER = "摄影指导"
-    DIRECTOR = "导演"
-    VIDEO_GENERATOR = "视频生成器"
-    POST_PRODUCTION = "后期制作"
+# 注：AgentRole 枚举的"正典"定义在 core/round_table.py 中（orchestrator 从那里导入）。
+# 本文件早期曾重复定义，但 orchestrator 与 quality_inspector 都使用 round_table 的版本，
+# 这个副本长期未被引用，删除以避免"两处定义"造成的认知负担。
 
 
 @dataclass

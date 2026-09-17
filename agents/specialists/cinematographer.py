@@ -286,14 +286,14 @@ class Cinematographer(BaseAgent):
     
     def _enhance_storyboard(self, storyboard: Dict, visual_dna: VisualDNA,
                            character_bank: CharacterBank) -> Dict:
-        """增强分镜，添加视觉细节"""
-        
+        """增强分镜，添加视觉细节（含运镜强化）"""
+
         enhanced = storyboard.copy()
         enhanced_shots = []
-        
+
         for shot in storyboard.get("shots", []):
             enhanced_shot = shot.copy()
-            
+
             # 添加光线描述
             lighting = visual_dna.dna["lighting"]
             enhanced_shot["lighting"] = {
@@ -301,19 +301,27 @@ class Cinematographer(BaseAgent):
                 "direction": lighting["direction"],
                 "mood": lighting["mood"]
             }
-            
+
             # 添加色彩方案
             colors = visual_dna.dna["color_palette"]
             enhanced_shot["color_palette"] = {
                 "primary": colors["primary"][:2],  # 最多2个主色
                 "accent": colors["accent"][:1] if colors["accent"] else []
             }
-            
+
             # 添加氛围效果
             atmosphere = visual_dna.dna["atmosphere"]
             if atmosphere["effects"]:
                 enhanced_shot["atmosphere_effects"] = atmosphere["effects"][:2]
-            
+
+            # 【新增】运镜增强：把 visual_dna 的全局摄影风格注入到每个镜头的 camera_description
+            camera_style = visual_dna.dna.get("camera_style", {})
+            enhanced_camera = self._enhance_camera_description(
+                shot, camera_style
+            )
+            if enhanced_camera:
+                enhanced_shot["camera_description"] = enhanced_camera
+
             # 增强角色描述（使用Character Bank）
             if shot.get("characters"):
                 enhanced_characters = []
@@ -323,21 +331,83 @@ class Cinematographer(BaseAgent):
                         "name": char_name,
                         "description": char_desc
                     })
-                    
+
                     # 标记出现
                     character_bank.mark_appearance(
                         char_name,
                         shot.get("shot_number", 0),
                         shot.get("duration", 0)
                     )
-                
+
                 enhanced_shot["enhanced_characters"] = enhanced_characters
-            
+
             enhanced_shots.append(enhanced_shot)
-        
+
         enhanced["shots"] = enhanced_shots
-        
+
         return enhanced
+
+    def _enhance_camera_description(self, shot: Dict, camera_style: Dict) -> Dict:
+        """
+        将全局摄影风格注入单个镜头的 camera_description。
+
+        策略：
+        - 若 shot 已有 camera_description（StoryboardArtist 生成的详细描述），在其基础上
+          追加/约束全局风格关键词，而不是覆盖掉原始的丰富细节。
+        - 若 shot 无 camera_description，则从 camera_style 全局构建一个。
+        - 添加 "运镜风格约束" 字段，记录本镜头的运镜基调，供 Director 在构建 prompt 时参考。
+        """
+        # 取出或初始化 camera_description
+        raw = shot.get("camera_description", {})
+        if isinstance(raw, str):
+            # 某些 shot 可能只有纯文本，先转 dict（保留原文供后续参考）
+            raw_text = raw
+            raw = {"_raw_text": raw_text}
+        elif not isinstance(raw, dict):
+            raw = {}
+
+        cam = dict(raw)  # 深拷贝
+
+        # --- 1. 全局 preferred_angles 注入 ---
+        global_angles = camera_style.get("preferred_angles", [])
+        if global_angles and "摄影角度指导" not in cam:
+            cam["摄影角度指导"] = f"全局风格约束：{'；'.join(global_angles)}"
+
+        # --- 2. 全局 movement_style 注入 ---
+        global_movement = camera_style.get("movement_style", "")
+        if global_movement and "全局运镜风格" not in cam:
+            cam["全局运镜风格"] = global_movement
+
+        # --- 3. 全局 focal_range 约束（合并到起始位置）---
+        global_focal = camera_style.get("focal_range", "")
+        if global_focal and cam.get("起始位置"):
+            # 在起始位置描述中补充焦段建议（如果原始描述没有提及焦段）
+            pos = cam["起始位置"]
+            if not any(kw in pos for kw in ["mm", "焦", "镜头"]):
+                cam["起始位置"] = f"{pos}（推荐焦段：{global_focal}）"
+
+        # --- 4. 全局 depth_of_field（景深）约束 ---
+        global_dof = camera_style.get("depth_of_field", "")
+        if global_dof and cam.get("焦点变化"):
+            focus = cam["焦点变化"]
+            # 若原始焦点描述未明确景深，则追加全局景深要求
+            if not any(kw in focus for kw in ["景深", "DOF", "f/", "f/"]):
+                cam["焦点变化"] = f"{focus}（全局景深要求：{global_dof}）"
+
+        # --- 5. 构建运镜风格约束（导演prompt构建时的重要参考）---
+        movement_constraints = []
+        if global_movement:
+            movement_constraints.append(f"运镜手法：{global_movement}")
+        if global_focal:
+            movement_constraints.append(f"焦段范围：{global_focal}")
+        if global_dof:
+            movement_constraints.append(f"景深偏好：{global_dof}")
+        if global_angles:
+            movement_constraints.append(f"可用角度：{'、'.join(global_angles)}")
+        if movement_constraints:
+            cam["运镜风格约束"] = "; ".join(movement_constraints)
+
+        return cam
     
     def _validate_visual_consistency(self, visual_dna: VisualDNA,
                                     character_bank: CharacterBank,

@@ -21,6 +21,15 @@
     "default_voice": "neutral",
     "speed": 1.0
   },
+  "image_api": {
+    "provider": "auto-detect",
+    "endpoint": "https://nanoapi.poloai.top/v1",
+    "api_key": "",
+    "model": "gemini-3.1-flash-image-preview",
+    "quality": "low",
+    "size": "1024x1024",
+    "timeout": 180
+  },
   "output_dir": "pipeline_output",
   "parallel_processing": false,
   "quality_checks": {

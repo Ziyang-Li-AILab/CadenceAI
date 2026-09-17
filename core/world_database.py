@@ -52,11 +52,33 @@ class Location:
 
 @dataclass
 class Prop:
-    """道具数据"""
+    """道具数据 - 故事中具有视觉识别度、需保持镜头间一致性的关键物品
+
+    与 Character / Location 的字段尽量对齐，便于上层 Agent 在统一模型上做提示词工程。
+    """
     name: str
-    description: str
-    significance: str
-    visual_key: str
+    description: str = ""            # 道具的文字描述
+    significance: str = ""           # 故事意义（剧情作用、为何重要）
+    visual_key: str = ""             # 视觉识别关键词（用于镜头中检索）
+    type: str = "道具"               # 道具类型：武器 / 载具 / 徽记 / 容器 / 法器 等
+    visual_elements: List[str] = field(default_factory=list)  # 关键视觉元素（材质、磨损、铭文等）
+    color_palette: List[str] = field(default_factory=list)
+    owner: str = ""                  # 所属角色 / 阵营；空表示公共
+    era: str = ""                    # 时代锚定
+    atmosphere: str = ""             # 携带的氛围（沉重、诡异、温暖等）
+
+    def get_setting_prompt(self) -> str:
+        """生成道具描述提示词片段（用于镜头参考图匹配/补充）。"""
+        elements = ", ".join(self.visual_elements)
+        colors = ", ".join(self.color_palette)
+        parts = [f"道具[{self.name}] | 识别关键: {self.visual_key}"]
+        if elements:
+            parts.append(f"元素: {elements}")
+        if colors:
+            parts.append(f"色调: {colors}")
+        if self.atmosphere:
+            parts.append(f"氛围: {self.atmosphere}")
+        return " | ".join(parts)
 
 
 class WorldDatabase:
@@ -124,35 +146,46 @@ class WorldDatabase:
     def add_prop(self, prop: Prop) -> None:
         """添加道具"""
         self.props[prop.name] = prop
+
+    def get_prop(self, name: str) -> Optional["Prop"]:
+        """获取道具（与 get_character / get_location 同形 API）"""
+        return self.props.get(name)
     
     def set_visual_style(self, **kwargs) -> None:
         """设置视觉风格"""
         self.visual_style.update(kwargs)
     
-    def get_visual_context_for_shot(self, shot_number: int, 
+    def get_visual_context_for_shot(self, shot_number: int,
                                      location_name: str = None,
-                                     character_names: List[str] = None) -> str:
+                                     character_names: List[str] = None,
+                                     prop_names: List[str] = None) -> str:
         """为某个镜头生成视觉上下文"""
         context_parts = []
-        
+
         if self.visual_style.get("color_palette"):
             colors = ", ".join(self.visual_style["color_palette"])
             context_parts.append(f"整体色调: {colors}")
-        
+
         if self.visual_style.get("lighting_style"):
             context_parts.append(f"灯光风格: {self.visual_style['lighting_style']}")
-        
+
         if location_name:
             loc = self.get_location(location_name)
             if loc:
                 context_parts.append(loc.get_setting_prompt())
-        
+
         if character_names:
             for name in character_names:
                 char = self.get_character(name)
                 if char:
                     context_parts.append(f"角色[{name}]: {char.get_consistency_prompt()}")
-        
+
+        if prop_names:
+            for name in prop_names:
+                prop = self.get_prop(name)
+                if prop:
+                    context_parts.append(prop.get_setting_prompt())
+
         return " | ".join(context_parts)
     
     def to_dict(self) -> Dict:
@@ -197,7 +230,19 @@ class WorldDatabase:
             db.locations[name] = Location(**loc_data)
         
         for name, prop_data in data.get("props", {}).items():
-            db.props[name] = Prop(**prop_data)
+            # 兼容旧版本只有 4 字段的 Prop 记录
+            db.props[name] = Prop(**{
+                "name": name,
+                "description": prop_data.get("description", ""),
+                "significance": prop_data.get("significance", ""),
+                "visual_key": prop_data.get("visual_key", ""),
+                "type": prop_data.get("type", "道具"),
+                "visual_elements": prop_data.get("visual_elements", []) or [],
+                "color_palette": prop_data.get("color_palette", []) or [],
+                "owner": prop_data.get("owner", ""),
+                "era": prop_data.get("era", ""),
+                "atmosphere": prop_data.get("atmosphere", ""),
+            })
         
         db.timeline = data.get("timeline", [])
         db.relationships = data.get("relationships", {})

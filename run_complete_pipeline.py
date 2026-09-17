@@ -37,7 +37,23 @@ import sys
 import io
 from pathlib import Path
 
-# 修复 Windows 终端编码问题
+# Load local secrets before building CONFIG. Existing environment variables win.
+def _load_env_file(path: Path) -> None:
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, value = line.split("=", 1)
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name and value and not os.getenv(name):
+            os.environ[name] = value
+
+
+_load_env_file(Path(__file__).resolve().parent / "configs" / "api_keys.env")
+
 if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
@@ -84,6 +100,15 @@ CONFIG = {
         "max_request_body_bytes": 8 * 1024 * 1024,
     },
     
+    # 图像生成配置（角色与场景参考图：Gemini image-preview via OpenAI 兼容接口）
+    "image_api": {
+        "api_key": _first_env("IMAGE_API_KEY"),
+        "endpoint": "https://nanoapi.poloai.top/v1/chat/completions",
+        "model": "gemini-3.1-flash-image-preview",
+        "size": "",
+        "steps": 0,
+    },
+
     # 音频生成配置
     "audio_api": {
         "endpoint": "https://openspeech.bytedance.com/api/v3/tts/create",
@@ -99,9 +124,12 @@ CONFIG = {
 
 
 def main():
-    """主函数"""
-    # RESUME_FROM = "20260914_114635"
-    RESUME_FROM = None
+    """主入口。RESUME_FROM 留空则启动新会话；填入会话目录名（例如 "20260916_101908"）则从该会话继续。"""
+    RESUME_FROM = "20260917_042339"  # 留空 = 新会话；填会话目录名 = 续跑
+    resume_path = (
+        Path(CONFIG["output_dir"]) / RESUME_FROM.strip() if RESUME_FROM.strip() else None
+    )
+    RESUME_FROM = RESUME_FROM.strip() if resume_path and resume_path.is_dir() else ""
     target_format = "中东废土风"
     reference_audio = "D:/cg_create/voice/wuming.m4a"
     target_duration = 30
@@ -114,6 +142,8 @@ def main():
         missing_keys.append("ARK_LLM_API_KEY (or VOLC_API_KEY)")
     if not CONFIG["video_api"]["api_key"]:
         missing_keys.append("ARK_VIDEO_API_KEY (or ARK_API_KEY)")
+    if not CONFIG["image_api"]["api_key"]:
+        missing_keys.append("IMAGE_API_KEY")
     if not CONFIG["audio_api"]["api_key"]:
         missing_keys.append("AUDIO_API_KEY (or TTS_API_KEY)")
     if missing_keys:
@@ -126,7 +156,7 @@ def main():
     print("=" * 80)
     print()
     print("配置:")
-    print("   - 参考图片: 按 prompt 自动匹配 photos/{元素名称}/")
+    print("   - 参考图片: 按 prompt 元素名自动匹配 {session}/assets/{characters|locations|props}/")
     print(f"   - 参考音频: {reference_audio}")
     print(f"   - 目标时长: {target_duration}秒")
     print()
@@ -149,6 +179,7 @@ def main():
             target_duration=target_duration,
             reference_audio=reference_audio,
             skip_video_gen=False,
+            target_format=target_format,
         )
     else:
         result = orchestrator.run(

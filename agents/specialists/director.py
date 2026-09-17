@@ -80,8 +80,9 @@ class Director(BaseAgent):
         character_bank = context.get("character_bank")
         world = context.get("world")
         reference_images = context.get("reference_images", [])
-        story_idea = context.get("story_idea", "")  # 【修复】接收原始 story_idea
-        
+        # 注：context 中的 "story_idea" 字段已被有意从 prompt 构建中移除（避免污染），
+        #     仅保留给污染检测（硬编码关键词列表，见下方 story_idea_keywords）。
+
         # [新增]接收质量反馈
         quality_feedback = context.get("quality_feedback")
         is_rework = context.get("rework", False)
@@ -951,6 +952,10 @@ class Director(BaseAgent):
             full_desc = camera_desc_raw.get("full_description", "")
             if full_desc and full_desc not in original_scene:
                 sections.append(full_desc)
+            # 【新增】摄影指导强化后的运镜风格约束（visual_dna 全局风格 → 单镜头）
+            camera_constraint = camera_desc_raw.get("运镜风格约束")
+            if camera_constraint and camera_constraint not in original_scene:
+                sections.append(f"【运镜风格约束】{camera_constraint}")
         elif camera_desc_raw and camera_desc_raw not in original_scene:
             sections.append(str(camera_desc_raw))
 

@@ -71,9 +71,11 @@ class VideoGenerator(BaseAgent):
         
         # 保留 context 供断点续传、导演帧继承决策等生成控制使用。
         self.context = context
-        
+        # 缓存当前会话的输出根目录，便于参考图查找等辅助逻辑从 session/assets 读取。
+        self.output_dir = Path(context.get("output_dir", "videos"))
+
         shots = context.get("shots", [])
-        output_dir = context.get("output_dir", Path("videos"))
+        output_dir = self.output_dir
         parallel = context.get("parallel", False)
         skip_video_gen = context.get("skip_video_gen", False)  # 【新增】从上下文获取
         
@@ -732,35 +734,129 @@ class VideoGenerator(BaseAgent):
 
     def _find_element_references(self, prompt: str) -> List[Path]:
         """
-        从 prompt 中检测元素名称，查找 D:/cg_create/photos 下对应子目录中的图片。
+        从 prompt 中检测元素名称，查找当前 session 资产目录下的参考图。
 
-        目录结构：D:/cg_create/photos/{元素名}/{图片文件}
-        例如：D:/cg_create/photos/无名/无名.png
-              D:/cg_create/photos/玄武/玄武.png
+        新结构（取代旧的 D:/cg_create/photos/{元素名}/）：
+            {session_dir}/assets/characters/{角色名}.png
+            {session_dir}/assets/locations/{场景名}.png
 
-        Args:
-            prompt: 镜头对应的视觉提示词
-
-        Returns:
-            匹配到的参考图片路径列表（不去重，保留子目录内所有图片）
+        匹配策略（按顺序尝试，任一命中即收录）：
+            1. 文件名 stem 完整出现在 prompt 中
+            2. 把 stem 中的下划线/连字符去掉再匹配（覆盖 X-7_大流士 → X-7大流士 / 大流士）
+            3. 去掉形如 "X-7_" 这类前缀后再匹配
+            4. 找到 stem 中长度 ≥ 2 的最长连续中文字符子串做包含匹配
+               （避免把"切卡"误匹配到"切卡机/卡卡"等场景）
         """
-        photos_root = Path(__file__).resolve().parents[2] / "photos"
-        if not photos_root.exists():
+        if not self.output_dir:
             return []
 
-        matched = []
-        prompt_lower = prompt.lower()
+        # session 目录 = videos/ 的父目录；assets/ 与之并列
+        session_dir = self.output_dir.parent
+        assets_root = session_dir / "assets"
+        if not assets_root.is_dir():
+            return []
 
-        for sub_dir in photos_root.iterdir():
-            if not sub_dir.is_dir():
+        matched: List[Path] = []
+        prompt_str = prompt or ""
+
+        # 候选资产目录
+        candidate_dirs = [
+            assets_root / "characters",
+            assets_root / "locations",
+            assets_root / "props",
+        ]
+
+        # 中文字符判断
+        def _has_cjk(s: str) -> bool:
+            return any("\u4e00" <= ch <= "\u9fff" for ch in s)
+
+        def _longest_cjk_run(stem: str) -> str:
+            best = ""
+            cur = []
+            for ch in stem:
+                if "\u4e00" <= ch <= "\u9fff":
+                    cur.append(ch)
+                else:
+                    if len(cur) > len(best):
+                        best = "".join(cur)
+                    cur = []
+            if len(cur) > len(best):
+                best = "".join(cur)
+            return best
+
+        def _all_cjk_runs(stem: str, min_len: int = 2) -> List[str]:
+            """所有长度 ≥ min_len 的连续中文字符串（按出现顺序），保留重复。"""
+            runs = []
+            cur = []
+            for ch in stem:
+                if "\u4e00" <= ch <= "\u9fff":
+                    cur.append(ch)
+                else:
+                    if len(cur) >= min_len:
+                        runs.append("".join(cur))
+                    cur = []
+            if len(cur) >= min_len:
+                runs.append("".join(cur))
+            return runs
+
+        def _strip_prefix_token(stem: str) -> str:
+            """去掉类似 'X-7_' 的前缀（字母/数字+下划线/连字符）。"""
+            parts = re.split(r"[_\-]+", stem)
+            if len(parts) >= 2 and all(
+                p and (p.isascii() and not _has_cjk(p)) for p in parts[:-1]
+            ):
+                return parts[-1]
+            return stem
+
+        seen: set = set()
+        for asset_dir in candidate_dirs:
+            if not asset_dir.is_dir():
                 continue
-            element_name = sub_dir.name
-            # 用中英文、简写匹配 prompt 中的元素名
-            if element_name.lower() in prompt_lower:
-                for img_file in sub_dir.rglob("*"):
-                    if img_file.is_file() and img_file.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp"):
-                        matched.append(img_file)
-                        print(f"  [参考图匹配] 元素 '{element_name}' → {img_file.name}")
+            for img_file in asset_dir.iterdir():
+                if not img_file.is_file():
+                    continue
+                if img_file.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+                    continue
+                if img_file in seen:
+                    continue
+
+                stem = img_file.stem  # 例如 "X-7_大流士"
+                # 策略 1：完整 stem
+                hit = stem and stem in prompt_str
+                # 策略 2：去掉下划线/连字符
+                if not hit:
+                    cleaned = re.sub(r"[_\-]+", "", stem)
+                    if cleaned and cleaned in prompt_str:
+                        hit = True
+                # 策略 3：去掉前缀 token
+                if not hit:
+                    stripped = _strip_prefix_token(stem)
+                    if stripped and stripped != stem and stripped in prompt_str:
+                        hit = True
+                # 策略 4：把 CJK run 按位置切分成若干片段，任一 ≥ 2 字符片段命中即认为匹配。
+                # 解决 "熄焰炼油厂" → "熄焰的炼油厂" 这种被"的"打断的场景。
+                if not hit:
+                    runs = _all_cjk_runs(stem)
+                    for run in runs:
+                        n = len(run)
+                        # 从长到短尝试切分（前缀 / 后缀 / 子串），任一 ≥ 2 字符命中即收
+                        candidates = set()
+                        for i in range(n):
+                            for j in range(i + 2, n + 1):
+                                piece = run[i:j]
+                                if len(piece) >= 2:
+                                    candidates.add(piece)
+                        for piece in sorted(candidates, key=len, reverse=True):
+                            if piece in prompt_str:
+                                hit = True
+                                break
+                        if hit:
+                            break
+
+                if hit:
+                    seen.add(img_file)
+                    matched.append(img_file)
+                    print(f"  [参考图匹配] '{img_file.parent.name}/{img_file.name}'")
 
         return matched
 
@@ -1969,16 +2065,28 @@ class VideoGenerator(BaseAgent):
         content = [{"type": "text", "text": prompt}]
         
 
+        # 构造 metadata。注：当前 doubao-seedance-2-0-mini 在 r2v（图生视频）
+        # 模式下不支持自定义 duration 参数，传了会被 API 400 拒绝：
+        #   "the parameter duration specified in the request is not valid for
+        #    model doubao-seedance-2-0-mini in r2v"
+        # 该模型在 r2v 模式下使用固定时长（约 5 秒），由模型自身决定。
+        # 因此这里不再向 Seedance 透传 shot.duration；其它视频 API（Kling、
+        # Runway、Pika）走各自的分支，原有 duration 透传逻辑保持不变。
+        seedance_metadata = {
+            "content": content,
+            "resolution": resolution,
+            "ratio": ratio,
+            "generate_audio": self.video_api_config.get("generate_audio", True),
+        }
+        # 仅在显式开启 "seedance_supports_duration" 时才透传 duration，
+        # 以便未来支持自定义时长的 Seedance 模型（如 pro 版）能直接受益。
+        if self.video_api_config.get("seedance_supports_duration", False):
+            seedance_metadata["duration"] = duration
+
         request_body = {
             "model": model,
             "prompt": "首帧生视频",
-            "metadata": {
-                "content": content,
-                "duration": -1,
-                "resolution": resolution,
-                "ratio": ratio,
-                "generate_audio": self.video_api_config.get("generate_audio", True),
-            },
+            "metadata": seedance_metadata,
         }
 
         max_request_body_bytes = max(

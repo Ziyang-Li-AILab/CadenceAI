@@ -195,19 +195,10 @@ class StoryboardArtist(BaseAgent):
             story_hint = f"""
 
 【原始故事想法参考】
-以下是原始的故事描述，其中可能包含此镜头的详细设计、旁白/解说词、光影要求等：
-
+以下是原始的故事描述：
 ---
-{story_idea[:3000]}
+{story_idea}
 ---
-
-【重要任务】
-请从上述原始描述中识别并提取：
-1. 此镜头对应的旁白/解说词（如"旁白：..."、"VO：..."、"某人说：..."等），逐字保留原文；
-2. 前景/后景视觉元素（如"前景有xxx"、"后景是yyy"）；
-3. 原始描述中已有的场景细节，优先使用，不做简化。
-
-如果原始描述中没有旁白，请明确写"无旁白"。
 """
         
         prompt = f"""基于以下基础信息，丰富这个电影镜头的视觉细节：
@@ -223,7 +214,7 @@ class StoryboardArtist(BaseAgent):
 
 请提供详细的视觉描述，输出JSON格式：
 {{
-    "scene_description": "详细场景描述（包括：空间布局、材质质感、环境氛围、光影效果，建议100-200字，保留原始描述中的细节，不要简化或截断）",
+    "scene_description": "详细场景描述（包括：空间布局、材质质感、环境氛围、光影效果，建议100-200字）",
     "key_action": "详细动作描述（包括：肢体动作、面部表情、眼神变化、手势细节、身体姿态，建议80-120字）",
     "narration": "旁白/解说词（完整原文，逐字保留；无旁白则写'无'）",
     "props": ["道具1", "道具2", "道具3"],
@@ -240,8 +231,7 @@ class StoryboardArtist(BaseAgent):
         }}
     }}
 }}
-
-【重要】请尽可能从原始故事想法中提取并保留完整的旁白/解说词，不要省略或简化。"""
+"""
 
         try:
             response = self._call_llm(prompt, self.SYSTEM_PROMPT, temperature=0.7, max_tokens=800)
@@ -311,21 +301,6 @@ class StoryboardArtist(BaseAgent):
             else:
                 character_name = speaker.strip()
             
-            # 【关键修复】只添加真实角色，过滤系统、组织、身份描述
-            # 真实角色特征：通常是简短的人名（1-3个字），不包含组织/身份描述
-            exclude_keywords = ["系统", "广播", "AI", "监控", "浮标", "武装", "残军", 
-                              "巡逻兵", "队长", "通讯员", "侦察兵", "祭司", "要塞"]
-            
-            # 如果是组织+身份的格式（如"哈夫克武装"），则不是真实角色
-            is_real_character = (
-                character_name and 
-                not any(kw in character_name for kw in exclude_keywords) and
-                len(character_name) <= 10  # 真实角色名通常较短
-            )
-            
-            if is_real_character:
-                characters.append(character_name)
-        
         shot["characters"] = characters
         
         # **使用LLM增强的详细描述**
@@ -335,8 +310,6 @@ class StoryboardArtist(BaseAgent):
         shot["lighting_hint"] = enhanced_shot.get("lighting_hint", "")
         shot["character_states"] = enhanced_shot.get("character_states", {})
 
-        # 从编剧保留的原始镜头描述中提取开头/结尾交接状态。
-        # 这些字段是帧继承判断的事实依据，不能只依赖通用转场标签。
         handoff = self._extract_frame_handoff(script_shot, story_idea, shot_number)
         shot["opening_description"] = handoff["opening"]
         shot["ending_description"] = handoff["ending"]
